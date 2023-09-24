@@ -1,0 +1,59 @@
+#!/usr/bin/env bash
+
+# script to control the LED on DualShock 4 controllers
+
+# immediately exit if any commands return non-zero
+set -e
+
+if [[ $UID != 0 ]]; then
+    echo "sudo required"
+    exit 1
+fi
+
+
+function helptext {
+	echo "Usage:"
+	echo "    on -- turn on DS4 LED"
+	echo "    off -- turn off DS4 LED"
+	echo "    0-255 0-255 0-255 -- set DS4 LED colour using RGB values"
+}
+
+if [ -z "$1" ]
+then
+	helptext
+	exit 1
+elif [ -n "$4" ]
+then
+	echo "Too many arguments."
+	echo ""
+	helptext
+	exit 1
+elif [ -z "$2" ]
+then
+	if [ "$1" = "on" ]
+	then 
+	echo 1 > /sys/class/hidraw/hidraw*/device/leds/0003:054C:09CC.*:global/brightness
+	elif [ "$1" = "off" ]
+	then
+	echo 0 > /sys/class/hidraw/hidraw*/device/leds/0003:054C:09CC.*:global/brightness
+	else
+		helptext
+		exit 1
+	fi
+elif [ -n "$1" ] && [ -n "$2" ] && [ -n "$3" ]
+then
+	if [ $1 -ge 0 ] 2>/dev/null && [ $1 -le 255 ] 2>/dev/null && [ $2 -ge 0 ] 2>/dev/null && [ $2 -le 255 ] 2>/dev/null && [ $3 -ge 0 ] 2>/dev/null && [ $3 -le 255 ] 2>/dev/null
+	then
+	echo $1 > /sys/class/hidraw/hidraw*/device/leds/0003:054C:09CC.*:red/brightness
+	echo $2 > /sys/class/hidraw/hidraw*/device/leds/0003:054C:09CC.*:green/brightness
+	echo $3 > /sys/class/hidraw/hidraw*/device/leds/0003:054C:09CC.*:blue/brightness
+	else
+		echo "RGB values must be between 0-255."
+		echo ""
+		helptext
+		exit 1
+	fi
+else
+	helptext
+	exit 1
+fi

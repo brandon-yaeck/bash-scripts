@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+
+# just specify a HH:MM time and it will calculate the seconds until that time to sleep 
+#	sleepuntil 22:30
+# use in conjunction with other commands using semicolon:
+#	sleepuntil 14:37; echo "hi"
+
+unixtimeonrun=$(date +%s)
+unixtimespecified=$(date +%s -d "$1")
+
+# for example, if it's currently 22:00 and you want to sleep until 07:00, simply entering 07:00 would mean 7:00 TODAY, which has already passed, resulting in a negative number in the final calculation
+if [[ $unixtimeonrun -gt $unixtimespecified ]]; then
+	unixtimespecified=$(date +%s -d "tomorrow $1")
+fi
+
+sleep $(( $unixtimespecified - $unixtimeonrun ))

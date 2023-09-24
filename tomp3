@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+# immediately exit if any commands return non-zero
+set -e
+
+# use -V 0-9 to change -q:a, with lower numbers being higher quality (equal to -V in lame)
+lamepresetnumber=0
+
+# shift moves all arguments down a number, disposing of the first argument.
+# basically we have to remove the -v whatever arguments after processing them or they'd be fed to ffmpeg in the for loop after this
+if [ "$1" == "-V" ]; then
+	lamepresetnumber="$2"
+	shift
+	shift
+fi
+
+# %.* is bash parameter expansion which removes the file extension including the period, so output files will have the same name as the input file but with the new extension
+for file in "$@"; do
+	ffmpeg -i "$file" -codec:a libmp3lame -q:a "$lamepresetnumber" "${file%.*}".mp3
+done

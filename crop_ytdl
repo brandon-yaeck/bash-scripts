@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+
+# USE: crop_ytdl <url>
+
+
+echo "Enter start time in [hh:]mm:ss"
+read starttime
+
+echo "Enter clip duration in [hh:]mm:ss or just seconds"
+read durationtime
+
+echo ""
+
+yt-dlp -F "$1"
+
+echo ""
+echo ""
+
+echo "Enter space separated format codes for audio and video. You can enter just one if you want, but no more than two."
+
+while true; do
+	read quality1 quality2 toomany
+	if [ "$toomany" ]; then
+		echo "ERROR: You can only enter 2 numbers"
+	elif [ -z "$quality1" ]; then
+		echo "ERROR: You must enter at least 1 number"
+	else
+		break
+	fi
+done
+
+echo "Enter output filename (including extension)"
+read outputfilename
+
+echo ""
+echo ""
+
+if [ "$quality2" ]; then
+	# when going through ffmpeg like this you can't do something like 137+141 as you would with the direct youtube-dl command, so if you want audio + video in dash you need to dl them as separate inputs so ffmpeg will merge them automatically (youtube-dl uses ffmpeg to merge them anyway)
+	ffmpeg -hide_banner -ss "$starttime" -i $(yt-dlp -f "$quality1" --get-url "$1") -ss "$starttime" -i $(youtube-dl -f "$quality2" --get-url "$1") -vcodec copy -acodec copy -t "$durationtime" "$outputfilename"
+else
+	ffmpeg -hide_banner -ss "$starttime" -i $(yt-dlp -f "$quality1" --get-url "$1") -vcodec copy -acodec copy -t "$durationtime" "$outputfilename"
+fi

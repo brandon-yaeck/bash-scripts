@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+
+if [ -d "$1" ]; then
+	if [ -d "$1/.git" ]; then
+		cd "$1"
+		git pull
+	else
+		echo "Directory "$1" already exists without a git repository in it. Rename the existing directory before running the command again."
+	fi
+else
+	git clone https://aur.archlinux.org/"$1".git
+fi
+

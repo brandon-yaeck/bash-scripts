@@ -1,0 +1,183 @@
+#!/usr/bin/env bash
+
+# immediately exit if any commands return non-zero
+#set -e
+
+echo "Package Manager Manager v0.7"
+echo ""
+echo -n "Last system update: "; \
+grep 'starting full system upgrade' /var/log/pacman.log | tail -n 1 | tr -d []'[:alpha:]'
+echo ""
+echo "1. Check for package updates without installing"
+echo "2. Update mirrors"
+echo "3. Remove cached packages older than the most recent 2 versions"
+echo "4. Remove cached packages of uninstalled programs"
+echo "5. Remove orphaned packages"
+echo "6. List potentially orphaned cyclic dependency packages"
+echo "7. List explicitly installed packages"
+echo "8. List installed packages not in the repositories"
+echo "9. List installed packages by filesize"
+echo "0. List installed packages only required as optional dependencies"
+echo "A. Find .pacnew and .pacsave files"
+echo "B. View package install/remove command log"
+echo "C. View upgrade history for a specified package"
+echo "D. View downgrade options for a specified package"
+echo "E. View full pacman log"
+echo "F. Check installed packages for files that differ from the original package"
+echo "G. Check installed packages against Parabola blacklists"
+echo ""
+echo "Q. exit"
+echo ""
+while true; do
+read -sn1 choice
+
+case "$choice" in
+	1)
+	checkupdates | less
+	;;
+	2)
+	url="https://archlinux.org/mirrorlist/?country=CA&country=US&protocol=https&ip_version=4&use_mirror_status=on"
+	tmpmirrorlist=$(mktemp --suffix=-mirrorupdate)
+	rankedmirrorlist=$(mktemp --suffix=-rankedmirrors)
+
+	echo "Downloading official list of successfully syncing mirrors from https://archlinux.org/mirrorlist/"
+	curl -s "$url" -o "$tmpmirrorlist"
+	sed -i '/^##/d; s/^#//' "$tmpmirrorlist"
+
+	echo "Ranking mirrors by connection speed"
+	rankmirrors -n 5 "$tmpmirrorlist" > "$rankedmirrorlist"
+
+	echo "Replacing /etc/pacman.d/mirrorlist"
+	sudo cp "$rankedmirrorlist" /etc/pacman.d/mirrorlist
+
+	echo ""
+	cat /etc/pacman.d/mirrorlist
+	echo ""
+	echo "The detailed status of these mirrors can be found at https://archlinux.org/mirrors/status/"
+	;;
+	3)
+	paccache -k2 -r
+	;;
+	4)
+	paccache -k0 -u -r
+	;;
+	5)
+	sudo pacman -Rs $(pacman -Qdtq)
+	;;
+	6)
+	# NOTE: this reads the output of pacman's package dependencies, which can sometimes be different from the actual package name, and then compares them to all installed packages
+	# for example, a package might require libcurl.so>=4-64, which is actually provided by the curl package
+	# as there is no way to easily know that curl is equivalent to that, the script will not be able to detect it
+	# to reduce the possibility of this happening, sed is used to replace all =<version> and .so from the text
+	# this wouldn't help for the above example, as libcurl still won't match curl, but it will work for other cases like curl=3.0 or curl.so
+	# as it is common for the package name to just not include the "lib" part at the front like the above example, those lines are then duplicated with the lib part removed in order to catch both cases
+	# there are also times where it is totally different for some reason, like the package requires python-dbus, which is provided by the dbus-python package
+	# for these reasons, the output may list false positives, so the results must still be checked individually
+	# it may also miss actual positives, which I currently have no solution for
+	pacman -Qeq | \
+		xargs -I PKG -P $(nproc) pactree -lu PKG | sed -r 's/=.*//; s/>//; s/<//; s/\.so//; s/^lib(.*)/&\n\1/' | \
+		sort -u > /tmp/needed.pkg
+	pacman -Qq | sort -u | comm -23 - /tmp/needed.pkg
+	;;
+	7)
+	expac -H M '%-25n\t%d\n%-25v\t(%m)\n' $(comm -23 <(pacman -Qqen) <(pacman -Qgq base base-devel | sort)) | less
+	;;
+	8)
+	expac -H M '%-25n\t%d\n%-25v\t(%m)\n' $(pacman -Qmq) | less
+	;;
+	9)
+	expac -H M '%m\t%n' | sort -hr | less
+	;;
+	0)
+	expac -H M '%-25n\t%d\n%-25v\t(%m) [%w]\n' $(comm -13 <(pacman -Qqt | sort) <(pacman -Qqtt | sort)) | sed 's/\[explicit\]//; s/\[dependency\]/\[INSTALLED AS DEPENDENCY\]/' | less
+	;;
+	a|A)
+	find /etc -iname '*.pacnew' -o -iname '*.pacsave' 2>/dev/null | grep --color=never '.' || find1failed=1
+	find /boot -iname '*.pacnew' -o -iname '*.pacsave' 2>/dev/null | grep --color=never '.' || if [ "$find1failed" ]; then echo "No .pacnew or .pacsave files found."; fi
+	;;
+	b|B)
+	# N loads 2 lines into the matcher at once, then look for ] Running on both the first and second line to find pacman commands that were cancelled (because nothing follows up in the log), !P prints out the first line if there's no match, D is required to keep the process going for w/e reason, honestly i don't understand the first sed command very much but it works so w/e basically it cuts out lines with Running pacman... if the very next line is also Running pacman.. because that only happens if you cancelled the command before doing anything.
+	# next the last line is checked (indicated by $ before s) for Running and is blanked out if matching, because again that only happens if the pacman command was cancelled (not covered by the first sed command here)
+	# grep is used to remove all lines that don't contain ] Running (non pacman commands)
+	# grep is then used to remove lines that don't contain a space anywhere after the dash in the pacman command, in other words pacman commands that aren't targeting a specific package, so stuff like -Syu -Syy -Su etc.
+	# then sed removes the [PACMAN] Running text
+	# then sed removes /usr/bin/ text, because some commands for some reason list the full pacman path
+	# tr removes single quotes around the pacman commands
+	# tac (reversed cat) prints out all the lines backwards so the most recent commands are first
+	sed 'N;/.*] Running.*\n.*] Running/!P;D' /var/log/pacman.log | sed '$ s/.*Running.*//' | grep "] Running" | grep -v "pacman -[^ ]*'" | sed 's/\[PACMAN\] Running //; s/\/usr\/bin\///' | tr -d "'" | tac | less
+	;;
+	c|C)
+	echo -n "Enter package name: "
+	read historypackagename
+	echo ""
+	grep " $historypackagename " /var/log/pacman.log | grep -v 'SCRIPTLET' | sed 's/\[PACMAN\]//; s/\[ALPM\]//'
+	echo ""
+	;;
+	d|D)
+	echo -n "Enter package name: "
+	read downgradepackagename
+	echo ""
+	echo "Packages available in local pacman cache:"
+	echo ""
+	find /var/cache/pacman/pkg -iname "$downgradepackagename-*.pkg.tar.zst" | sort | grep --color=never '.' || echo "No packages found."
+	echo ""
+	echo "For other versions, check https://archive.archlinux.org/packages/${downgradepackagename:0:1}/$downgradepackagename/"
+	echo ""
+	echo "To downgrade, use pacman -U with the local path or the archive url of the desired version."
+	echo "You can then optionally add the package to IgnorePkg in /etc/pacman.conf to prevent it from being upgraded again in the future."
+	echo ""
+	;;
+	e|E)
+	less /var/log/pacman.log
+	;;
+	f|F)
+	LC_ALL=en_US.UTF-8 sudo pacman -Qkk | grep -v '0 altered files'
+	echo ""
+	echo "Done."
+	echo ""
+	;;
+	g|G)
+	echo "Downloading blacklists to /tmp/"
+
+	url="https://git.parabola.nu/blacklist.git/plain"
+
+	parabola_blacklist=$(mktemp --suffix=-parabola_blacklist)
+	parabola_aur_blacklist=$(mktemp --suffix=-parabola_aur_blacklist)
+	parabola_privacy_blacklist=$(mktemp --suffix=-parabola_privacy_blacklist)
+
+
+	curl -s "$url/blacklist.txt" -o "$parabola_blacklist"
+	curl -s "$url/aur-blacklist.txt" -o "$parabola_aur_blacklist"
+	curl -s "$url/your-privacy-blacklist.txt" -o "$parabola_privacy_blacklist"
+
+
+	# grep can search for multiple things simply by giving it a newline-separated list (in this case pacman -Qq)
+	# using sed to add the regex ^ to the start and literal : to the end of each line of the pacman -Qq output so only the package entry in the blacklist will be matched
+	# a second grep searches for specific categories in the blacklist, as we don't want the [technical] or [branding] categories. See https://git.parabola.nu/blacklist.git/tree/SYNTAX
+	# a final grep excludes some stupid things
+
+	echo ""
+	echo "Proprietary blacklist:"
+	echo ""
+
+	grep --color=always "$(pacman -Qq | sed 's/^/\^/; s/$/\:/')" "$parabola_blacklist" | grep --color=never '\[nonfree\]\|\[semifree\]\|\[uses-nonfree\]\|\[FIXME' | grep -v 'qt5-webengine\|pacman-mirrorlist\|intel-ucode\|syslinux\|filesystem:filesystem:'
+
+	grep --color=always "$(pacman -Qq | sed 's/^/\^/; s/$/\:/')" "$parabola_aur_blacklist"
+
+
+
+	echo ""
+	echo "Privacy blacklist:"
+	echo ""
+
+	grep --color=always "$(pacman -Qq | sed 's/^/\^/; s/$/\:/')" "$parabola_privacy_blacklist"
+	;;
+	q|Q)
+	exit 0
+	;;
+	*)
+	# do nothing and just wait for a correct command
+	;;
+esac
+
+done
